@@ -14,6 +14,7 @@ public class AudioWaveformModule extends ReactContextBaseJavaModule {
 
     private static final String TAG = "WaveformDebug";
     private AtomicBoolean isCancelled = new AtomicBoolean(false);
+    private AtomicBoolean isProcessing = new AtomicBoolean(false);
     private static final int FFT_SIZE = 1024;
     private static final float MAX_AMPLITUDE = 32767f;
     
@@ -57,9 +58,17 @@ public class AudioWaveformModule extends ReactContextBaseJavaModule {
 
         if (url == null || url.isEmpty()) {
             Log.e(TAG, "错误：音频 URL 为空");
-            promise.reject("INVALID_URL", "音频文件路径不能为空");
+            WritableMap errorResult = Arguments.createMap();
+            errorResult.putString("status", "error");
+            errorResult.putString("error", "INVALID_URL");
+            errorResult.putString("message", "音频文件路径不能为空");
+            promise.resolve(errorResult);
             return;
         }
+
+        // 设置处理状态
+        isProcessing.set(true);
+        isCancelled.set(false);
 
         MediaExtractor extractor = null;
         MediaCodec codec = null;
@@ -86,7 +95,11 @@ public class AudioWaveformModule extends ReactContextBaseJavaModule {
 
             if (audioTrackIndex == -1 || format == null) {
                 Log.e(TAG, "未找到音频轨道");
-                promise.reject("NO_AUDIO_TRACK", "未找到音频轨道");
+                WritableMap errorResult = Arguments.createMap();
+                errorResult.putString("status", "error");
+                errorResult.putString("error", "NO_AUDIO_TRACK");
+                errorResult.putString("message", "未找到音频轨道");
+                promise.resolve(errorResult);
                 return;
             }
 
@@ -220,14 +233,22 @@ public class AudioWaveformModule extends ReactContextBaseJavaModule {
 
             if (isCancelled.get()) {
                 Log.d(TAG, "任务已取消");
-                promise.reject("CANCELLED", "波形生成已取消");
+                WritableMap errorResult = Arguments.createMap();
+                errorResult.putString("status", "error");
+                errorResult.putString("error", "CANCELLED");
+                errorResult.putString("message", "波形生成已取消");
+                promise.resolve(errorResult);
                 return;
             }
 
             // 6. 检查数据有效性
             if (allSamples.isEmpty()) {
                 Log.w(TAG, "警告：未提取到任何 PCM 采样");
-                promise.resolve(Arguments.createArray());
+                WritableMap errorResult = Arguments.createMap();
+                errorResult.putString("status", "error");
+                errorResult.putString("error", "NO_DATA");
+                errorResult.putString("message", "未提取到音频数据");
+                promise.resolve(errorResult);
                 return;
             }
 
@@ -289,11 +310,21 @@ public class AudioWaveformModule extends ReactContextBaseJavaModule {
             }
 
             Log.d(TAG, "波形生成完成，返回点数:" + arr.size());
-            promise.resolve(arr);
+            
+            // 返回成功结果
+            WritableMap successResult = Arguments.createMap();
+            successResult.putString("status", "success");
+            successResult.putArray("data", arr);
+            successResult.putString("message", "波形生成完成");
+            promise.resolve(successResult);
 
         } catch (Exception e) {
             Log.e(TAG, "处理失败:" + e.getMessage(), e);
-            promise.reject("DECODE_ERROR", "音频解析失败:" + e.getMessage());
+            WritableMap errorResult = Arguments.createMap();
+            errorResult.putString("status", "error");
+            errorResult.putString("error", "DECODE_ERROR");
+            errorResult.putString("message", "音频解析失败: " + e.getMessage());
+            promise.resolve(errorResult);
         } finally {
             // 安全释放资源
             if (extractor != null) {
@@ -311,6 +342,7 @@ public class AudioWaveformModule extends ReactContextBaseJavaModule {
                     Log.w(TAG, "释放解码器异常: " + ignored.getMessage());
                 }
             }
+            isProcessing.set(false);
             isCancelled.set(false);
             Log.d(TAG, "====== 处理结束 ======\n");
         }
@@ -367,6 +399,11 @@ public class AudioWaveformModule extends ReactContextBaseJavaModule {
     public void cancel() {
         Log.d(TAG, "取消波形生成任务");
         isCancelled.set(true);
+    }
+
+    @ReactMethod
+    public boolean isProcessing() {
+        return isProcessing.get();
     }
 
     private static class PCMSample {

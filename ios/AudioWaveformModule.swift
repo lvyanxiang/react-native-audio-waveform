@@ -4,6 +4,9 @@ import React
 
 @objc(AudioWaveformModule)
 class AudioWaveformModule: NSObject {
+  
+  private var isProcessing = false
+  private var isCancelled = false
 
   @objc
   func getWaveform(_ options: [String: Any],
@@ -11,11 +14,22 @@ class AudioWaveformModule: NSObject {
                    rejecter reject: @escaping RCTPromiseRejectBlock) {
     
     guard let urlString = options["url"] as? String, !urlString.isEmpty else {
-      reject("INVALID_URL", "音频文件路径不能为空", nil)
+      let errorResult: [String: Any] = [
+        "status": "error",
+        "error": "INVALID_URL",
+        "message": "音频文件路径不能为空"
+      ]
+      resolve(errorResult)
       return
     }
     
     let samples = options["samples"] as? Int ?? 200
+    let waveformType = options["type"] as? String ?? "amplitude"
+    
+    // 设置处理状态
+    isProcessing = true
+    isCancelled = false
+    
     let fileURL: URL
     if urlString.hasPrefix("file://") {
       fileURL = URL(fileURLWithPath: String(urlString.dropFirst(7)))
@@ -26,7 +40,12 @@ class AudioWaveformModule: NSObject {
     do {
       let asset = AVURLAsset(url: fileURL)
       guard let track = asset.tracks(withMediaType: .audio).first else {
-        reject("NO_AUDIO_TRACK", "未找到音频轨道，请检查文件是否包含音频", nil)
+        let errorResult: [String: Any] = [
+          "status": "error",
+          "error": "NO_AUDIO_TRACK",
+          "message": "未找到音频轨道，请检查文件是否包含音频"
+        ]
+        resolve(errorResult)
         return
       }
       
@@ -66,6 +85,17 @@ class AudioWaveformModule: NSObject {
       let startTime = Date()
       
       while let sampleBuffer = trackOutput.copyNextSampleBuffer() {
+        // 检查是否被取消
+        if isCancelled {
+          let errorResult: [String: Any] = [
+            "status": "error",
+            "error": "CANCELLED",
+            "message": "波形生成已取消"
+          ]
+          resolve(errorResult)
+          return
+        }
+        
         guard let blockBuffer = CMSampleBufferGetDataBuffer(sampleBuffer) else { continue }
         let length = CMBlockBufferGetDataLength(blockBuffer)
         var data = [Float](repeating: 0, count: length / MemoryLayout<Float>.size)
@@ -81,10 +111,8 @@ class AudioWaveformModule: NSObject {
           // 如果当前时间窗口结束，计算该窗口的波形值
           if currentTime >= windowEndTime {
             if !tempValues.isEmpty {
-              let rmsValue = calculateRMS(tempValues)
-              let peakValue = findPeak(tempValues)
-              let finalValue = peakValue * 0.7 + rmsValue * 0.3
-              waveform.append(finalValue)
+              let value = calculateWaveformValue(tempValues, type: waveformType)
+              waveform.append(value)
               
               // 移动到下一个时间窗口
               windowStartTime = windowEndTime
@@ -109,10 +137,8 @@ class AudioWaveformModule: NSObject {
       
       // 处理最后一个时间窗口的数据
       if !tempValues.isEmpty && waveform.count < samples {
-        let rmsValue = calculateRMS(tempValues)
-        let peakValue = findPeak(tempValues)
-        let finalValue = peakValue * 0.7 + rmsValue * 0.3
-        waveform.append(finalValue)
+        let value = calculateWaveformValue(tempValues, type: waveformType)
+        waveform.append(value)
       }
       
       // 确保波形数据数量正确
@@ -121,7 +147,12 @@ class AudioWaveformModule: NSObject {
       }
       
       if waveform.isEmpty {
-        reject("NO_AUDIO_DATA", "无法从音频文件中提取数据，请检查文件是否损坏", nil)
+        let errorResult: [String: Any] = [
+          "status": "error",
+          "error": "NO_DATA",
+          "message": "无法从音频文件中提取数据，请检查文件是否损坏"
+        ]
+        resolve(errorResult)
         return
       }
       
@@ -153,23 +184,54 @@ class AudioWaveformModule: NSObject {
       print("Audio duration: \(durationSeconds) seconds")
       print("Processing time: \(processingTime)ms")
       
-      resolve(result)
+      // 返回成功结果
+      let successResult: [String: Any] = [
+        "status": "success",
+        "data": result,
+        "message": "波形生成完成"
+      ]
+      resolve(successResult)
       
     } catch {
       let errorMessage = getErrorMessage(error)
-      reject("DECODE_ERROR", errorMessage, error)
+      let errorResult: [String: Any] = [
+        "status": "error",
+        "error": "DECODE_ERROR",
+        "message": "音频解析失败: \(errorMessage)"
+      ]
+      resolve(errorResult)
+    } finally {
+      isProcessing = false
     }
   }
   
-  private func calculateRMS(_ values: [Double]) -> Double {
-    guard !values.isEmpty else { return 0.0 }
-    let sum = values.reduce(0) { $0 + $1 * $1 }
-    return sqrt(sum / Double(values.count))
+  @objc
+  func cancel() {
+    print("取消波形生成任务")
+    isCancelled = true
   }
   
-  private func findPeak(_ values: [Double]) -> Double {
+  @objc
+  func isProcessing() -> Bool {
+    return isProcessing
+  }
+  
+  private func calculateWaveformValue(_ values: [Double], type: String) -> Double {
     guard !values.isEmpty else { return 0.0 }
-    return values.max() ?? 0.0
+    
+    switch type {
+    case "peak":
+      return values.max() ?? 0.0
+    case "rms":
+      let sum = values.reduce(0) { $0 + $1 * $1 }
+      return sqrt(sum / Double(values.count))
+    case "logarithmic":
+      let avg = values.reduce(0, +) / Double(values.count)
+      return avg > 0 ? log10(1 + avg) / log10(2) : 0.0
+    case "amplitude":
+    default:
+      return values.reduce(0, +) / Double(values.count)
+    }
   }
   
   private func getErrorMessage(_ error: Error) -> String {

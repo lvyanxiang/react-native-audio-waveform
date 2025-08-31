@@ -4,4 +4,6 @@
 RCT_EXTERN_METHOD(getWaveform:(NSDictionary *)options
                   resolver:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
+RCT_EXTERN_METHOD(cancel)
+RCT_EXTERN_METHOD(isProcessing:(RCTResponseSenderBlock)callback)
 @end
