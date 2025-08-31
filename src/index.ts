@@ -34,7 +34,7 @@ export function generateWaveform(
 }
 
 // 检查是否正在处理
-export function isProcessing(): boolean {
+export function isProcessing(): Promise<boolean> {
   return AudioWaveform.isProcessing();
 }
 

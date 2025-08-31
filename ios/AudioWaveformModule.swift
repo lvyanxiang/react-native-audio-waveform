@@ -205,8 +205,8 @@ class AudioWaveformModule: NSObject {
   }
   
   @objc
-  func isProcessing() -> Bool {
-    return isProcessing
+  func isProcessing(_ resolve: @escaping RCTPromiseResolveBlock, rejecter reject: @escaping RCTPromiseRejectBlock) {
+    resolve(isProcessing)
   }
   
   private func calculateWaveformValue(_ values: [Double], type: String) -> Double {

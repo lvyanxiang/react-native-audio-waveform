@@ -22,46 +22,52 @@ export default function TestFlow() {
     addLog('=== 开始测试流程 ===');
     
     // 1. 测试初始状态
-    addLog(`初始状态 - isProcessing: ${isProcessing()}`);
-    
-    // 2. 调用generateWaveform
-    addLog('调用 generateWaveform...');
-    const result = generateWaveform(
-      {
-        url: '/test/audio.mp3',
-        samples: 50,
-        type: 'amplitude'
-      },
-      (waveformResult) => {
-        addLog('收到回调结果:');
-        if (waveformResult.data) {
-          addLog(`✅ 成功 - 数据点数: ${waveformResult.data.length}`);
-          setLoading(false);
-        } else if (waveformResult.error) {
-          addLog(`❌ 失败 - 错误: ${waveformResult.error}`);
-          setLoading(false);
+    isProcessing().then((processing) => {
+      addLog(`初始状态 - isProcessing: ${processing}`);
+      
+      // 2. 调用generateWaveform
+      addLog('调用 generateWaveform...');
+      const result = generateWaveform(
+        {
+          url: '/test/audio.mp3',
+          samples: 50,
+          type: 'amplitude'
+        },
+        (waveformResult) => {
+          addLog('收到回调结果:');
+          if (waveformResult.data) {
+            addLog(`✅ 成功 - 数据点数: ${waveformResult.data.length}`);
+            setLoading(false);
+          } else if (waveformResult.error) {
+            addLog(`❌ 失败 - 错误: ${waveformResult.error}`);
+            setLoading(false);
+          }
         }
-      }
-    );
-    
-    // 3. 验证立即返回结果
-    addLog(`立即返回结果: ${JSON.stringify(result)}`);
-    addLog(`返回的loading状态: ${result.loading}`);
-    
-    // 4. 设置loading状态
-    setLoading(true);
-    
-    // 5. 检查处理状态
-    setTimeout(() => {
-      addLog(`延迟检查 - isProcessing: ${isProcessing()}`);
-    }, 100);
+      );
+      
+      // 3. 验证立即返回结果
+      addLog(`立即返回结果: ${JSON.stringify(result)}`);
+      addLog(`返回的loading状态: ${result.loading}`);
+      
+      // 4. 设置loading状态
+      setLoading(true);
+      
+      // 5. 检查处理状态
+      setTimeout(() => {
+        isProcessing().then((processing) => {
+          addLog(`延迟检查 - isProcessing: ${processing}`);
+        });
+      }, 100);
+    });
   };
 
   const testCancel = () => {
     addLog('测试取消功能...');
     cancelWaveform();
-    addLog(`取消后 - isProcessing: ${isProcessing()}`);
-    setLoading(false);
+    isProcessing().then((processing) => {
+      addLog(`取消后 - isProcessing: ${processing}`);
+      setLoading(false);
+    });
   };
 
   const clearLogs = () => {

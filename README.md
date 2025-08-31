@@ -51,9 +51,11 @@ console.log('Loading:', result.loading); // true
 
 ```typescript
 // 检查是否正在处理
-if (isProcessing()) {
-  console.log('正在处理音频...');
-}
+isProcessing().then((processing) => {
+  if (processing) {
+    console.log('正在处理音频...');
+  }
+});
 ```
 
 ### 取消任务
@@ -89,7 +91,7 @@ cancelWaveform();
 检查是否正在处理音频。
 
 **返回值:**
-- `boolean`: 是否正在处理
+- `Promise<boolean>`: 是否正在处理
 
 ### cancelWaveform()
 

@@ -390,8 +390,8 @@ public class AudioWaveformModule extends ReactContextBaseJavaModule {
     }
 
     @ReactMethod
-    public boolean isProcessing() {
-        return isProcessing.get();
+    public void isProcessing(Promise promise) {
+        promise.resolve(isProcessing.get());
     }
 
     private static class PCMSample {

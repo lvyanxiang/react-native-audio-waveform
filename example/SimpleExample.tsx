@@ -14,38 +14,41 @@ export default function SimpleExample() {
   const [waveformData, setWaveformData] = useState<any[]>([]);
 
   const handleGenerateWaveform = () => {
-    if (isProcessing()) {
-      Alert.alert('提示', '已有任务正在处理中');
-      return;
-    }
-
-    // 设置loading状态
-    setLoading(true);
-    setWaveformData([]);
-
-    // 调用波形生成
-    const result = generateWaveform(
-      {
-        url: '/path/to/your/audio/file.mp3', // 替换为你的音频文件路径
-        samples: 100, // 生成100个波形点
-        type: 'amplitude', // 波形类型
-      },
-      (waveformResult) => {
-        // 回调函数，处理生成结果
-        setLoading(false); // 处理完成，设置loading为false
-        
-        if (waveformResult.data) {
-          setWaveformData(waveformResult.data);
-          console.log('波形数据生成完成:', waveformResult.data.length, '个点');
-        } else if (waveformResult.error) {
-          console.log('波形生成失败:', waveformResult.error);
-          Alert.alert('错误', waveformResult.error);
-        }
+    // 检查是否已经在处理
+    isProcessing().then((processing) => {
+      if (processing) {
+        Alert.alert('提示', '已有任务正在处理中');
+        return;
       }
-    );
 
-    // 立即获取loading状态
-    console.log('开始生成波形，loading状态:', result.loading);
+      // 设置loading状态
+      setLoading(true);
+      setWaveformData([]);
+
+      // 调用波形生成
+      const result = generateWaveform(
+        {
+          url: '/path/to/your/audio/file.mp3', // 替换为你的音频文件路径
+          samples: 100, // 生成100个波形点
+          type: 'amplitude', // 波形类型
+        },
+        (waveformResult) => {
+          // 回调函数，处理生成结果
+          setLoading(false); // 处理完成，设置loading为false
+          
+          if (waveformResult.data) {
+            setWaveformData(waveformResult.data);
+            console.log('波形数据生成完成:', waveformResult.data.length, '个点');
+          } else if (waveformResult.error) {
+            console.log('波形生成失败:', waveformResult.error);
+            Alert.alert('错误', waveformResult.error);
+          }
+        }
+      );
+
+      // 立即获取loading状态
+      console.log('开始生成波形，loading状态:', result.loading);
+    });
   };
 
   const handleCancel = () => {

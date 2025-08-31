@@ -15,6 +15,6 @@ export interface WaveformResult {
 export declare function generateWaveform(options: WaveformOptions, callback: (result: WaveformResult) => void): {
     loading: boolean;
 };
-export declare function isProcessing(): boolean;
+export declare function isProcessing(): Promise<boolean>;
 export declare function cancelWaveform(): void;
 //# sourceMappingURL=index.d.ts.map
