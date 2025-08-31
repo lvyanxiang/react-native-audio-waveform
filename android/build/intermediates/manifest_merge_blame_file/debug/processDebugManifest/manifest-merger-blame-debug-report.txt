@@ -1,0 +1,23 @@
+1<?xml version="1.0" encoding="utf-8"?>
+2<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+3    package="com.audiowaveform" >
+4
+5    <uses-sdk android:minSdkVersion="24" />
+6
+7    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+7-->/Users/lvyanxiang/workspace/ztgame/v2/vibeme-native/node_modules/@lvyanxiang/react-native-audio-waveform/android/src/main/AndroidManifest.xml:5:5-80
+7-->/Users/lvyanxiang/workspace/ztgame/v2/vibeme-native/node_modules/@lvyanxiang/react-native-audio-waveform/android/src/main/AndroidManifest.xml:5:22-77
+8    <uses-permission android:name="android.permission.INTERNET" />
+8-->/Users/lvyanxiang/workspace/ztgame/v2/vibeme-native/node_modules/@lvyanxiang/react-native-audio-waveform/android/src/main/AndroidManifest.xml:6:5-67
+8-->/Users/lvyanxiang/workspace/ztgame/v2/vibeme-native/node_modules/@lvyanxiang/react-native-audio-waveform/android/src/main/AndroidManifest.xml:6:22-64
+9    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
+9-->/Users/lvyanxiang/workspace/ztgame/v2/vibeme-native/node_modules/@lvyanxiang/react-native-audio-waveform/android/src/main/AndroidManifest.xml:7:5-75
+9-->/Users/lvyanxiang/workspace/ztgame/v2/vibeme-native/node_modules/@lvyanxiang/react-native-audio-waveform/android/src/main/AndroidManifest.xml:7:22-72
+10
+11    <application>
+11-->/Users/lvyanxiang/workspace/ztgame/v2/vibeme-native/node_modules/@lvyanxiang/react-native-audio-waveform/android/src/main/AndroidManifest.xml:9:5-11:19
+12
+13        <!-- 应用配置 -->
+14    </application>
+15
+16</manifest>

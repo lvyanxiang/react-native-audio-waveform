@@ -1,0 +1,52 @@
+{
+  "name": "@lvyanxiang/react-native-audio-waveform",
+  "version": "1.0.28",
+  "description": "A React Native library for generating audio waveform data from audio files",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "files": [
+    "lib",
+    "android",
+    "ios"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "clean": "rm -rf lib",
+    "prebuild": "npm run clean",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "react-native",
+    "audio",
+    "waveform",
+    "ios",
+    "android",
+    "typescript"
+  ],
+  "author": "lvyanxiang <2256334253@qq.com>",
+  "license": "MIT",
+  "peerDependencies": {
+    "react": ">=17.0.0",
+    "react-native": ">=0.70.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.0.0",
+    "@types/react-native": "^0.72.0",
+    "typescript": "^5.1.0"
+  },
+  "react-native": {
+    "platforms": {
+      "ios": {},
+      "android": {}
+    }
+  },
+  "rnpm": {
+    "android": {
+      "packageImportPath": "import com.audiowaveform.AudioWaveformPackage;",
+      "packageInstance": "new AudioWaveformPackage()"
+    },
+    "ios": {
+      "project": "ios/AudioWaveform.xcodeproj"
+    }
+  }
+}

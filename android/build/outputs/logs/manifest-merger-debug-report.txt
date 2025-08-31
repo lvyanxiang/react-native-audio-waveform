@@ -1,0 +1,31 @@
+-- Merging decision tree log ---
+manifest
+ADDED from /Users/lvyanxiang/workspace/ztgame/v2/vibeme-native/node_modules/@lvyanxiang/react-native-audio-waveform/android/src/main/AndroidManifest.xml:2:1-13:12
+INJECTED from /Users/lvyanxiang/workspace/ztgame/v2/vibeme-native/node_modules/@lvyanxiang/react-native-audio-waveform/android/src/main/AndroidManifest.xml:2:1-13:12
+	package
+		ADDED from /Users/lvyanxiang/workspace/ztgame/v2/vibeme-native/node_modules/@lvyanxiang/react-native-audio-waveform/android/src/main/AndroidManifest.xml:3:5-32
+		INJECTED from /Users/lvyanxiang/workspace/ztgame/v2/vibeme-native/node_modules/@lvyanxiang/react-native-audio-waveform/android/src/main/AndroidManifest.xml
+	xmlns:android
+		ADDED from /Users/lvyanxiang/workspace/ztgame/v2/vibeme-native/node_modules/@lvyanxiang/react-native-audio-waveform/android/src/main/AndroidManifest.xml:2:11-69
+uses-permission#android.permission.READ_EXTERNAL_STORAGE
+ADDED from /Users/lvyanxiang/workspace/ztgame/v2/vibeme-native/node_modules/@lvyanxiang/react-native-audio-waveform/android/src/main/AndroidManifest.xml:5:5-80
+	android:name
+		ADDED from /Users/lvyanxiang/workspace/ztgame/v2/vibeme-native/node_modules/@lvyanxiang/react-native-audio-waveform/android/src/main/AndroidManifest.xml:5:22-77
+uses-permission#android.permission.INTERNET
+ADDED from /Users/lvyanxiang/workspace/ztgame/v2/vibeme-native/node_modules/@lvyanxiang/react-native-audio-waveform/android/src/main/AndroidManifest.xml:6:5-67
+	android:name
+		ADDED from /Users/lvyanxiang/workspace/ztgame/v2/vibeme-native/node_modules/@lvyanxiang/react-native-audio-waveform/android/src/main/AndroidManifest.xml:6:22-64
+uses-permission#android.permission.READ_MEDIA_AUDIO
+ADDED from /Users/lvyanxiang/workspace/ztgame/v2/vibeme-native/node_modules/@lvyanxiang/react-native-audio-waveform/android/src/main/AndroidManifest.xml:7:5-75
+	android:name
+		ADDED from /Users/lvyanxiang/workspace/ztgame/v2/vibeme-native/node_modules/@lvyanxiang/react-native-audio-waveform/android/src/main/AndroidManifest.xml:7:22-72
+application
+ADDED from /Users/lvyanxiang/workspace/ztgame/v2/vibeme-native/node_modules/@lvyanxiang/react-native-audio-waveform/android/src/main/AndroidManifest.xml:9:5-11:19
+uses-sdk
+INJECTED from /Users/lvyanxiang/workspace/ztgame/v2/vibeme-native/node_modules/@lvyanxiang/react-native-audio-waveform/android/src/main/AndroidManifest.xml reason: use-sdk injection requested
+INJECTED from /Users/lvyanxiang/workspace/ztgame/v2/vibeme-native/node_modules/@lvyanxiang/react-native-audio-waveform/android/src/main/AndroidManifest.xml
+INJECTED from /Users/lvyanxiang/workspace/ztgame/v2/vibeme-native/node_modules/@lvyanxiang/react-native-audio-waveform/android/src/main/AndroidManifest.xml
+	android:targetSdkVersion
+		INJECTED from /Users/lvyanxiang/workspace/ztgame/v2/vibeme-native/node_modules/@lvyanxiang/react-native-audio-waveform/android/src/main/AndroidManifest.xml
+	android:minSdkVersion
+		INJECTED from /Users/lvyanxiang/workspace/ztgame/v2/vibeme-native/node_modules/@lvyanxiang/react-native-audio-waveform/android/src/main/AndroidManifest.xml

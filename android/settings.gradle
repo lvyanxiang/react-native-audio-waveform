@@ -1,0 +1,2 @@
+include ':react-native-audio-waveform'
+project(':react-native-audio-waveform').projectDir = new File(rootProject.projectDir, '../node_modules/@lvyanxiang/react-native-audio-waveform/android')
