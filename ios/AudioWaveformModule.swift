@@ -7,39 +7,29 @@ class AudioWaveformModule: NSObject {
   
   private var isProcessing = false
   private var isCancelled = false
-  private var currentState: [String: Any] = [:]
-  private var stateChangeCallback: RCTResponseSenderBlock?
   private let processingQueue = DispatchQueue(label: "AudioWaveformProcessing", qos: .userInitiated)
-
-  override init() {
-    super.init()
-    initializeState()
-  }
-  
-  private func initializeState() {
-    currentState = [
-      "loading": false,
-      "message": "空闲"
-    ]
-  }
 
   @objc
   func getWaveform(_ options: [String: Any],
-                   resolver resolve: @escaping RCTPromiseResolveBlock,
-                   rejecter reject: @escaping RCTPromiseResolveBlock) {
+                   callback: @escaping RCTResponseSenderBlock) {
     
-    // 立即返回初始状态
-    resolve(currentState)
+    // 检查是否已经在处理
+    if isProcessing {
+      print("已有任务正在处理中")
+      return
+    }
     
-    // 在后台队列中处理，不阻塞UI
+    // 在后台队列中处理
     processingQueue.async {
-      self.processWaveformInBackground(options)
+      self.processWaveformInBackground(options, callback: callback)
     }
   }
 
-  private func processWaveformInBackground(_ options: [String: Any]) {
+  private func processWaveformInBackground(_ options: [String: Any],
+                                         callback: @escaping RCTResponseSenderBlock) {
     guard let urlString = options["url"] as? String, !urlString.isEmpty else {
-      updateState(loading: false, data: nil, error: "INVALID_URL", message: "音频文件路径不能为空")
+      let errorResult: [String: Any] = ["error": "音频文件路径不能为空"]
+      callback([errorResult])
       return
     }
     
@@ -49,7 +39,6 @@ class AudioWaveformModule: NSObject {
     // 设置处理状态
     isProcessing = true
     isCancelled = false
-    updateState(loading: true, data: nil, error: nil, message: "正在初始化音频文件...")
     
     let fileURL: URL
     if urlString.hasPrefix("file://") {
@@ -61,7 +50,8 @@ class AudioWaveformModule: NSObject {
     do {
       let asset = AVURLAsset(url: fileURL)
       guard let track = asset.tracks(withMediaType: .audio).first else {
-        updateState(loading: false, data: nil, error: "NO_AUDIO_TRACK", message: "未找到音频轨道，请检查文件是否包含音频")
+        let errorResult: [String: Any] = ["error": "未找到音频轨道"]
+        callback([errorResult])
         return
       }
       
@@ -103,7 +93,8 @@ class AudioWaveformModule: NSObject {
       while let sampleBuffer = trackOutput.copyNextSampleBuffer() {
         // 检查是否被取消
         if isCancelled {
-          updateState(loading: false, data: nil, error: "CANCELLED", message: "波形生成已取消")
+          let cancelResult: [String: Any] = ["error": "任务已取消"]
+          callback([cancelResult])
           return
         }
         
@@ -158,7 +149,8 @@ class AudioWaveformModule: NSObject {
       }
       
       if waveform.isEmpty {
-        updateState(loading: false, data: nil, error: "NO_DATA", message: "无法从音频文件中提取数据，请检查文件是否损坏")
+        let errorResult: [String: Any] = ["error": "未提取到音频数据"]
+        callback([errorResult])
         return
       }
       
@@ -190,50 +182,26 @@ class AudioWaveformModule: NSObject {
       print("Audio duration: \(durationSeconds) seconds")
       print("Processing time: \(processingTime)ms")
       
-      // 更新成功状态
-      updateState(loading: false, data: result, error: nil, message: "波形生成完成")
+      // 通过回调返回成功结果
+      let finalResult: [String: Any] = [
+        "data": result
+      ]
+      callback([finalResult])
       
     } catch {
-      let errorMessage = getErrorMessage(error)
-      updateState(loading: false, data: nil, error: "DECODE_ERROR", message: "音频解析失败: \(errorMessage)")
+      let errorResult: [String: Any] = ["error": "音频解析失败"]
+      callback([errorResult])
     } finally {
       isProcessing = false
     }
-  }
-  
-  // 更新状态并通知回调
-  private func updateState(loading: Bool, data: [[String: Any]]?, error: String?, message: String?) {
-    currentState["loading"] = loading
-    if let data = data {
-      currentState["data"] = data
-    }
-    if let error = error {
-      currentState["error"] = error
-    }
-    if let message = message {
-      currentState["message"] = message
-    }
-    
-    // 通知状态变化
-    if let callback = stateChangeCallback {
-      callback([currentState])
-    }
-  }
-  
-  @objc
-  func getWaveformState(_ resolve: @escaping RCTPromiseResolveBlock, rejecter reject: @escaping RCTPromiseRejectBlock) {
-    resolve(currentState)
-  }
-  
-  @objc
-  func onStateChange(_ callback: @escaping RCTResponseSenderBlock) {
-    self.stateChangeCallback = callback
   }
   
   @objc
   func cancel() {
     print("取消波形生成任务")
     isCancelled = true
+    // 重置处理状态
+    isProcessing = false
   }
   
   @objc
@@ -256,26 +224,6 @@ class AudioWaveformModule: NSObject {
     case "amplitude":
     default:
       return values.reduce(0, +) / Double(values.count)
-    }
-  }
-  
-  private func getErrorMessage(_ error: Error) -> String {
-    let errorDescription = error.localizedDescription
-    
-    if errorDescription.contains("Permission") {
-      return "权限不足，请检查文件访问权限"
-    } else if errorDescription.contains("FileNotFound") {
-      return "文件未找到，请检查路径"
-    } else if errorDescription.contains("Malformed") {
-      return "音频文件损坏或格式错误"
-    } else if errorDescription.contains("IndexOutOfBounds") {
-      return "音频数据读取错误"
-    } else if errorDescription.contains("Security") {
-      return "安全权限不足，请检查应用权限"
-    } else if errorDescription.contains("IllegalArgumentException") {
-      return "音频文件过大或格式不支持"
-    } else {
-      return "音频处理失败: \(errorDescription)"
     }
   }
 }

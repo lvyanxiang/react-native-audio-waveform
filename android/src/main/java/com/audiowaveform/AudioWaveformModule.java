@@ -14,7 +14,7 @@ import java.util.concurrent.Executors;
 
 public class AudioWaveformModule extends ReactContextBaseJavaModule {
 
-    private static final String TAG = "WaveformDebug";
+    private static final String TAG = "AudioWaveform";
     private AtomicBoolean isCancelled = new AtomicBoolean(false);
     private AtomicBoolean isProcessing = new AtomicBoolean(false);
     private static final int FFT_SIZE = 1024;
@@ -24,21 +24,11 @@ public class AudioWaveformModule extends ReactContextBaseJavaModule {
     private static final int MAX_SAMPLES = 1000000; // 最大采样数限制
     private static final int MAX_BUFFER_SIZE = 8192; // 最大缓冲区大小
     
-    // 状态管理
-    private WritableMap currentState;
-    private Callback stateChangeCallback;
     private ExecutorService executorService;
 
     public AudioWaveformModule(ReactApplicationContext reactContext) {
         super(reactContext);
         executorService = Executors.newSingleThreadExecutor();
-        initializeState();
-    }
-
-    private void initializeState() {
-        currentState = Arguments.createMap();
-        currentState.putBoolean("loading", false);
-        currentState.putString("message", "空闲");
     }
 
     @Override
@@ -47,44 +37,48 @@ public class AudioWaveformModule extends ReactContextBaseJavaModule {
     }
 
     @ReactMethod
-    public void getWaveform(ReadableMap options, Promise promise) {
-        Log.d(TAG, "====== 开始处理波形生成 ======");
+    public void getWaveform(ReadableMap options, Callback callback) {
+        Log.d(TAG, "开始处理波形生成");
         
-        // 立即返回初始状态
-        promise.resolve(currentState);
+        // 检查是否已经在处理
+        if (isProcessing.get()) {
+            Log.w(TAG, "已有任务正在处理中");
+            return;
+        }
         
-        // 在后台线程中处理，不阻塞UI
+        // 在后台线程中处理
         executorService.execute(() -> {
-            processWaveformInBackground(options);
+            processWaveformInBackground(options, callback);
         });
     }
 
-    private void processWaveformInBackground(ReadableMap options) {
+    private void processWaveformInBackground(ReadableMap options, Callback callback) {
         String url = options.getString("url");
         int samples = options.hasKey("samples") ? options.getInt("samples") : 200;
         String waveformType = options.hasKey("type") ? options.getString("type") : "amplitude";
         
         // 限制采样数，防止内存问题
-        samples = Math.max(1, Math.min(500, samples)); // 降低最大采样数
+        samples = Math.max(1, Math.min(500, samples));
 
         Log.d(TAG, "参数信息 - URL:" + url + ", 采样点数:" + samples + ", 类型:" + waveformType);
 
         if (url == null || url.isEmpty()) {
-            updateState(false, null, "INVALID_URL", "音频文件路径不能为空");
+            Log.e(TAG, "音频文件路径不能为空");
+            WritableMap errorResult = Arguments.createMap();
+            errorResult.putString("error", "音频文件路径不能为空");
+            callback.invoke(errorResult);
             return;
         }
 
         // 设置处理状态
         isProcessing.set(true);
         isCancelled.set(false);
-        updateState(true, null, null, "正在初始化音频文件...");
 
         MediaExtractor extractor = null;
         MediaCodec codec = null;
 
         try {
             // 1. 初始化提取器
-            updateState(true, null, null, "正在分析音频轨道...");
             extractor = new MediaExtractor();
             extractor.setDataSource(url);
             Log.d(TAG, "提取器初始化成功，开始查找音频轨道");
@@ -105,31 +99,31 @@ public class AudioWaveformModule extends ReactContextBaseJavaModule {
 
             if (audioTrackIndex == -1 || format == null) {
                 Log.e(TAG, "未找到音频轨道");
-                updateState(false, null, "NO_AUDIO_TRACK", "未找到音频轨道");
+                WritableMap errorResult = Arguments.createMap();
+                errorResult.putString("error", "未找到音频轨道");
+                callback.invoke(errorResult);
                 return;
             }
 
-            // 3. 打印音频格式信息
+            // 3. 获取音频格式信息
             int sampleRate = format.getInteger(MediaFormat.KEY_SAMPLE_RATE);
             int channelCount = format.getInteger(MediaFormat.KEY_CHANNEL_COUNT);
             long durationUs = format.getLong(MediaFormat.KEY_DURATION);
             double durationSec = durationUs / 1_000_000.0;
             
             Log.d(TAG, "音频格式信息 - 采样率:" + sampleRate + "Hz, 声道数:" + channelCount + 
-                  ", 元数据时长:" + durationSec + "秒");
+                  ", 时长:" + durationSec + "秒");
 
             extractor.selectTrack(audioTrackIndex);
             String mimeType = format.getString(MediaFormat.KEY_MIME);
             
             // 4. 初始化解码器
-            updateState(true, null, null, "正在初始化解码器...");
             codec = MediaCodec.createDecoderByType(mimeType);
             codec.configure(format, null, null, 0);
             codec.start();
             Log.d(TAG, "解码器初始化成功，开始解码 PCM 数据");
 
             // 5. 解码并收集数据
-            updateState(true, null, null, "正在解码音频数据...");
             List<PCMSample> allSamples = new ArrayList<>();
             MediaCodec.BufferInfo bufferInfo = new MediaCodec.BufferInfo();
             boolean isEOS = false;
@@ -149,12 +143,6 @@ public class AudioWaveformModule extends ReactContextBaseJavaModule {
                     break;
                 }
 
-                // 更新进度
-                if (allSamples.size() % 1000 == 0) {
-                    updateState(true, null, null, 
-                        "正在解码音频数据... (" + allSamples.size() + " 采样)");
-                }
-
                 // 处理输入缓冲区
                 int inputIndex = codec.dequeueInputBuffer(10000);
                 if (inputIndex >= 0) {
@@ -169,8 +157,6 @@ public class AudioWaveformModule extends ReactContextBaseJavaModule {
                                 isEOS = true;
                             } else {
                                 long presentationTimeUs = extractor.getSampleTime();
-                                Log.d(TAG, "处理输入缓冲区 - 大小:" + sampleSize + "字节，时间戳:" + 
-                                      presentationTimeUs/1000000.0 + "秒");
                                 codec.queueInputBuffer(inputIndex, 0, sampleSize, presentationTimeUs, 0);
                                 extractor.advance();
                             }
@@ -247,19 +233,22 @@ public class AudioWaveformModule extends ReactContextBaseJavaModule {
 
             if (isCancelled.get()) {
                 Log.d(TAG, "任务已取消");
-                updateState(false, null, "CANCELLED", "波形生成已取消");
+                WritableMap cancelResult = Arguments.createMap();
+                cancelResult.putString("error", "任务已取消");
+                callback.invoke(cancelResult);
                 return;
             }
 
             // 6. 检查数据有效性
             if (allSamples.isEmpty()) {
                 Log.w(TAG, "警告：未提取到任何 PCM 采样");
-                updateState(false, null, "NO_DATA", "未提取到音频数据");
+                WritableMap errorResult = Arguments.createMap();
+                errorResult.putString("error", "未提取到音频数据");
+                callback.invoke(errorResult);
                 return;
             }
 
             // 7. 生成波形点
-            updateState(true, null, null, "正在生成波形数据...");
             double actualDuration = allSamples.get(allSamples.size() - 1).time - allSamples.get(0).time;
             double timePerPoint = actualDuration / samples;
             
@@ -299,12 +288,6 @@ public class AudioWaveformModule extends ReactContextBaseJavaModule {
                     // 计算波形值
                     double value = calculateWaveformValue(intervalSamples, waveformType);
 
-                    // 打印关键信息
-                    if (i % 50 == 0 || i >= samples - 10) {
-                        Log.d(TAG, "波形点" + i + "- 时间区间: [" + startTime + "," + endTime + ")," +
-                              "采样数:" + intervalSamples.size() + ", 值:" + value);
-                    }
-
                     WritableMap point = createWaveformPoint(startTime + timePerPoint / 2, value, i);
                     arr.pushMap(point);
                     
@@ -318,12 +301,16 @@ public class AudioWaveformModule extends ReactContextBaseJavaModule {
 
             Log.d(TAG, "波形生成完成，返回点数:" + arr.size());
             
-            // 更新成功状态
-            updateState(false, arr, null, "波形生成完成");
+            // 通过回调返回成功结果
+            WritableMap result = Arguments.createMap();
+            result.putArray("data", arr);
+            callback.invoke(result);
 
         } catch (Exception e) {
             Log.e(TAG, "处理失败:" + e.getMessage(), e);
-            updateState(false, null, "DECODE_ERROR", "音频解析失败: " + e.getMessage());
+            WritableMap errorResult = Arguments.createMap();
+            errorResult.putString("error", "音频解析失败: " + e.getMessage());
+            callback.invoke(errorResult);
         } finally {
             // 安全释放资源
             if (extractor != null) {
@@ -343,37 +330,8 @@ public class AudioWaveformModule extends ReactContextBaseJavaModule {
             }
             isProcessing.set(false);
             isCancelled.set(false);
-            Log.d(TAG, "====== 处理结束 ======\n");
+            Log.d(TAG, "处理结束");
         }
-    }
-
-    // 更新状态并通知回调
-    private void updateState(boolean loading, WritableArray data, String error, String message) {
-        currentState.putBoolean("loading", loading);
-        if (data != null) {
-            currentState.putArray("data", data);
-        }
-        if (error != null) {
-            currentState.putString("error", error);
-        }
-        if (message != null) {
-            currentState.putString("message", message);
-        }
-        
-        // 通知状态变化
-        if (stateChangeCallback != null) {
-            stateChangeCallback.invoke(currentState);
-        }
-    }
-
-    @ReactMethod
-    public void getWaveformState(Promise promise) {
-        promise.resolve(currentState);
-    }
-
-    @ReactMethod
-    public void onStateChange(Callback callback) {
-        this.stateChangeCallback = callback;
     }
 
     private WritableMap createWaveformPoint(double time, double value, int index) {
@@ -427,6 +385,8 @@ public class AudioWaveformModule extends ReactContextBaseJavaModule {
     public void cancel() {
         Log.d(TAG, "取消波形生成任务");
         isCancelled.set(true);
+        // 重置处理状态
+        isProcessing.set(false);
     }
 
     @ReactMethod

@@ -8,15 +8,13 @@ export interface WaveformPoint {
     value: number;
     index: number;
 }
-export interface WaveformState {
-    loading: boolean;
+export interface WaveformResult {
     data?: WaveformPoint[];
     error?: string;
-    message?: string;
 }
-export declare function generateWaveform(options: WaveformOptions): WaveformState;
-export declare function getWaveformState(): WaveformState;
-export declare function cancelWaveform(): void;
+export declare function generateWaveform(options: WaveformOptions, callback: (result: WaveformResult) => void): {
+    loading: boolean;
+};
 export declare function isProcessing(): boolean;
-export declare function onWaveformStateChange(callback: (state: WaveformState) => void): void;
+export declare function cancelWaveform(): void;
 //# sourceMappingURL=index.d.ts.map
