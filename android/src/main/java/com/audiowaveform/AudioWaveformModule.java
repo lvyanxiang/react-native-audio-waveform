@@ -9,6 +9,8 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public class AudioWaveformModule extends ReactContextBaseJavaModule {
 
@@ -21,9 +23,22 @@ public class AudioWaveformModule extends ReactContextBaseJavaModule {
     // 添加内存限制常量
     private static final int MAX_SAMPLES = 1000000; // 最大采样数限制
     private static final int MAX_BUFFER_SIZE = 8192; // 最大缓冲区大小
+    
+    // 状态管理
+    private WritableMap currentState;
+    private Callback stateChangeCallback;
+    private ExecutorService executorService;
 
     public AudioWaveformModule(ReactApplicationContext reactContext) {
         super(reactContext);
+        executorService = Executors.newSingleThreadExecutor();
+        initializeState();
+    }
+
+    private void initializeState() {
+        currentState = Arguments.createMap();
+        currentState.putBoolean("loading", false);
+        currentState.putString("message", "空闲");
     }
 
     @Override
@@ -35,18 +50,16 @@ public class AudioWaveformModule extends ReactContextBaseJavaModule {
     public void getWaveform(ReadableMap options, Promise promise) {
         Log.d(TAG, "====== 开始处理波形生成 ======");
         
-        // 确保在主线程上执行
-        getReactApplicationContext().runOnUiQueueThread(() -> {
-            try {
-                processWaveform(options, promise);
-            } catch (Exception e) {
-                Log.e(TAG, "主线程处理异常: " + e.getMessage(), e);
-                promise.reject("THREAD_ERROR", "线程处理异常: " + e.getMessage());
-            }
+        // 立即返回初始状态
+        promise.resolve(currentState);
+        
+        // 在后台线程中处理，不阻塞UI
+        executorService.execute(() -> {
+            processWaveformInBackground(options);
         });
     }
 
-    private void processWaveform(ReadableMap options, Promise promise) {
+    private void processWaveformInBackground(ReadableMap options) {
         String url = options.getString("url");
         int samples = options.hasKey("samples") ? options.getInt("samples") : 200;
         String waveformType = options.hasKey("type") ? options.getString("type") : "amplitude";
@@ -57,24 +70,21 @@ public class AudioWaveformModule extends ReactContextBaseJavaModule {
         Log.d(TAG, "参数信息 - URL:" + url + ", 采样点数:" + samples + ", 类型:" + waveformType);
 
         if (url == null || url.isEmpty()) {
-            Log.e(TAG, "错误：音频 URL 为空");
-            WritableMap errorResult = Arguments.createMap();
-            errorResult.putString("status", "error");
-            errorResult.putString("error", "INVALID_URL");
-            errorResult.putString("message", "音频文件路径不能为空");
-            promise.resolve(errorResult);
+            updateState(false, null, "INVALID_URL", "音频文件路径不能为空");
             return;
         }
 
         // 设置处理状态
         isProcessing.set(true);
         isCancelled.set(false);
+        updateState(true, null, null, "正在初始化音频文件...");
 
         MediaExtractor extractor = null;
         MediaCodec codec = null;
 
         try {
             // 1. 初始化提取器
+            updateState(true, null, null, "正在分析音频轨道...");
             extractor = new MediaExtractor();
             extractor.setDataSource(url);
             Log.d(TAG, "提取器初始化成功，开始查找音频轨道");
@@ -95,11 +105,7 @@ public class AudioWaveformModule extends ReactContextBaseJavaModule {
 
             if (audioTrackIndex == -1 || format == null) {
                 Log.e(TAG, "未找到音频轨道");
-                WritableMap errorResult = Arguments.createMap();
-                errorResult.putString("status", "error");
-                errorResult.putString("error", "NO_AUDIO_TRACK");
-                errorResult.putString("message", "未找到音频轨道");
-                promise.resolve(errorResult);
+                updateState(false, null, "NO_AUDIO_TRACK", "未找到音频轨道");
                 return;
             }
 
@@ -116,12 +122,14 @@ public class AudioWaveformModule extends ReactContextBaseJavaModule {
             String mimeType = format.getString(MediaFormat.KEY_MIME);
             
             // 4. 初始化解码器
+            updateState(true, null, null, "正在初始化解码器...");
             codec = MediaCodec.createDecoderByType(mimeType);
             codec.configure(format, null, null, 0);
             codec.start();
             Log.d(TAG, "解码器初始化成功，开始解码 PCM 数据");
 
             // 5. 解码并收集数据
+            updateState(true, null, null, "正在解码音频数据...");
             List<PCMSample> allSamples = new ArrayList<>();
             MediaCodec.BufferInfo bufferInfo = new MediaCodec.BufferInfo();
             boolean isEOS = false;
@@ -139,6 +147,12 @@ public class AudioWaveformModule extends ReactContextBaseJavaModule {
                 if (allSamples.size() > MAX_SAMPLES) {
                     Log.w(TAG, "采样数过多，强制结束处理");
                     break;
+                }
+
+                // 更新进度
+                if (allSamples.size() % 1000 == 0) {
+                    updateState(true, null, null, 
+                        "正在解码音频数据... (" + allSamples.size() + " 采样)");
                 }
 
                 // 处理输入缓冲区
@@ -233,26 +247,19 @@ public class AudioWaveformModule extends ReactContextBaseJavaModule {
 
             if (isCancelled.get()) {
                 Log.d(TAG, "任务已取消");
-                WritableMap errorResult = Arguments.createMap();
-                errorResult.putString("status", "error");
-                errorResult.putString("error", "CANCELLED");
-                errorResult.putString("message", "波形生成已取消");
-                promise.resolve(errorResult);
+                updateState(false, null, "CANCELLED", "波形生成已取消");
                 return;
             }
 
             // 6. 检查数据有效性
             if (allSamples.isEmpty()) {
                 Log.w(TAG, "警告：未提取到任何 PCM 采样");
-                WritableMap errorResult = Arguments.createMap();
-                errorResult.putString("status", "error");
-                errorResult.putString("error", "NO_DATA");
-                errorResult.putString("message", "未提取到音频数据");
-                promise.resolve(errorResult);
+                updateState(false, null, "NO_DATA", "未提取到音频数据");
                 return;
             }
 
             // 7. 生成波形点
+            updateState(true, null, null, "正在生成波形数据...");
             double actualDuration = allSamples.get(allSamples.size() - 1).time - allSamples.get(0).time;
             double timePerPoint = actualDuration / samples;
             
@@ -311,20 +318,12 @@ public class AudioWaveformModule extends ReactContextBaseJavaModule {
 
             Log.d(TAG, "波形生成完成，返回点数:" + arr.size());
             
-            // 返回成功结果
-            WritableMap successResult = Arguments.createMap();
-            successResult.putString("status", "success");
-            successResult.putArray("data", arr);
-            successResult.putString("message", "波形生成完成");
-            promise.resolve(successResult);
+            // 更新成功状态
+            updateState(false, arr, null, "波形生成完成");
 
         } catch (Exception e) {
             Log.e(TAG, "处理失败:" + e.getMessage(), e);
-            WritableMap errorResult = Arguments.createMap();
-            errorResult.putString("status", "error");
-            errorResult.putString("error", "DECODE_ERROR");
-            errorResult.putString("message", "音频解析失败: " + e.getMessage());
-            promise.resolve(errorResult);
+            updateState(false, null, "DECODE_ERROR", "音频解析失败: " + e.getMessage());
         } finally {
             // 安全释放资源
             if (extractor != null) {
@@ -346,6 +345,35 @@ public class AudioWaveformModule extends ReactContextBaseJavaModule {
             isCancelled.set(false);
             Log.d(TAG, "====== 处理结束 ======\n");
         }
+    }
+
+    // 更新状态并通知回调
+    private void updateState(boolean loading, WritableArray data, String error, String message) {
+        currentState.putBoolean("loading", loading);
+        if (data != null) {
+            currentState.putArray("data", data);
+        }
+        if (error != null) {
+            currentState.putString("error", error);
+        }
+        if (message != null) {
+            currentState.putString("message", message);
+        }
+        
+        // 通知状态变化
+        if (stateChangeCallback != null) {
+            stateChangeCallback.invoke(currentState);
+        }
+    }
+
+    @ReactMethod
+    public void getWaveformState(Promise promise) {
+        promise.resolve(currentState);
+    }
+
+    @ReactMethod
+    public void onStateChange(Callback callback) {
+        this.stateChangeCallback = callback;
     }
 
     private WritableMap createWaveformPoint(double time, double value, int index) {

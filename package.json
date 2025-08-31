@@ -1,7 +1,7 @@
 {
   "name": "@lvyanxiang/react-native-audio-waveform",
-  "version": "1.0.31",
-  "description": "A React Native library for generating audio waveform data from audio files",
+  "version": "2.0.0",
+  "description": "A React Native library for generating audio waveform data with async state management",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
   "files": [
@@ -21,7 +21,9 @@
     "waveform",
     "ios",
     "android",
-    "typescript"
+    "typescript",
+    "async",
+    "state-management"
   ],
   "author": "lvyanxiang <2256334253@qq.com>",
   "license": "MIT",
