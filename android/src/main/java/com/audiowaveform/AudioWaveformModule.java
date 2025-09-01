@@ -17,13 +17,13 @@ public class AudioWaveformModule extends ReactContextBaseJavaModule {
     private static final String TAG = "AudioWaveform";
     private AtomicBoolean isCancelled = new AtomicBoolean(false);
     private AtomicBoolean isProcessing = new AtomicBoolean(false);
-    private static final int FFT_SIZE = 1024;
     private static final float MAX_AMPLITUDE = 32767f;
-    
-    // 添加内存限制常量
-    private static final int MAX_SAMPLES = 1000000; // 最大采样数限制
-    private static final int MAX_BUFFER_SIZE = 8192; // 最大缓冲区大小
-    
+
+    // 限制常量
+    private static final int MAX_SAMPLES = 5000000; // 增加到500万样本，支持更大的音频文件
+    private static final int MAX_BUFFER_SIZE = 8192;
+    private static final float SILENCE_THRESHOLD = 0.001f; // 静音阈值
+
     private ExecutorService executorService;
 
     public AudioWaveformModule(ReactApplicationContext reactContext) {
@@ -39,14 +39,12 @@ public class AudioWaveformModule extends ReactContextBaseJavaModule {
     @ReactMethod
     public void getWaveform(ReadableMap options, Callback callback) {
         Log.d(TAG, "开始处理波形生成");
-        
-        // 检查是否已经在处理
+
         if (isProcessing.get()) {
             Log.w(TAG, "已有任务正在处理中");
             return;
         }
-        
-        // 在后台线程中处理
+
         executorService.execute(() -> {
             processWaveformInBackground(options, callback);
         });
@@ -56,21 +54,17 @@ public class AudioWaveformModule extends ReactContextBaseJavaModule {
         String url = options.getString("url");
         int samples = options.hasKey("samples") ? options.getInt("samples") : 200;
         String waveformType = options.hasKey("type") ? options.getString("type") : "amplitude";
-        
-        // 限制采样数，防止内存问题
-        samples = Math.max(1, Math.min(500, samples));
 
+        samples = Math.max(1, Math.min(500, samples));
         Log.d(TAG, "参数信息 - URL:" + url + ", 采样点数:" + samples + ", 类型:" + waveformType);
 
         if (url == null || url.isEmpty()) {
-            Log.e(TAG, "音频文件路径不能为空");
             WritableMap errorResult = Arguments.createMap();
             errorResult.putString("error", "音频文件路径不能为空");
             callback.invoke(errorResult);
             return;
         }
 
-        // 设置处理状态
         isProcessing.set(true);
         isCancelled.set(false);
 
@@ -78,18 +72,14 @@ public class AudioWaveformModule extends ReactContextBaseJavaModule {
         MediaCodec codec = null;
 
         try {
-            // 1. 初始化提取器
             extractor = new MediaExtractor();
             extractor.setDataSource(url);
-            Log.d(TAG, "提取器初始化成功，开始查找音频轨道");
 
-            // 2. 查找音频轨道
             int audioTrackIndex = -1;
             MediaFormat format = null;
             for (int i = 0; i < extractor.getTrackCount(); i++) {
                 MediaFormat f = extractor.getTrackFormat(i);
                 String mime = f.getString(MediaFormat.KEY_MIME);
-                Log.d(TAG, "轨道" + i + "格式:" + mime);
                 if (mime != null && mime.startsWith("audio/")) {
                     audioTrackIndex = i;
                     format = f;
@@ -98,239 +88,211 @@ public class AudioWaveformModule extends ReactContextBaseJavaModule {
             }
 
             if (audioTrackIndex == -1 || format == null) {
-                Log.e(TAG, "未找到音频轨道");
                 WritableMap errorResult = Arguments.createMap();
                 errorResult.putString("error", "未找到音频轨道");
                 callback.invoke(errorResult);
                 return;
             }
 
-            // 3. 获取音频格式信息
             int sampleRate = format.getInteger(MediaFormat.KEY_SAMPLE_RATE);
             int channelCount = format.getInteger(MediaFormat.KEY_CHANNEL_COUNT);
             long durationUs = format.getLong(MediaFormat.KEY_DURATION);
             double durationSec = durationUs / 1_000_000.0;
-            
-            Log.d(TAG, "音频格式信息 - 采样率:" + sampleRate + "Hz, 声道数:" + channelCount + 
-                  ", 时长:" + durationSec + "秒");
 
             extractor.selectTrack(audioTrackIndex);
             String mimeType = format.getString(MediaFormat.KEY_MIME);
-            
-            // 4. 初始化解码器
+
             codec = MediaCodec.createDecoderByType(mimeType);
             codec.configure(format, null, null, 0);
             codec.start();
-            Log.d(TAG, "解码器初始化成功，开始解码 PCM 数据");
 
-            // 5. 解码并收集数据
             List<PCMSample> allSamples = new ArrayList<>();
             MediaCodec.BufferInfo bufferInfo = new MediaCodec.BufferInfo();
             boolean isEOS = false;
-            int totalFrames = 0;
             long processStartTime = System.currentTimeMillis();
 
             while (!isCancelled.get() && !isEOS) {
-                // 检查超时
-                if (System.currentTimeMillis() - processStartTime > 30000) {
-                    Log.w(TAG, "处理超时，强制结束");
-                    break;
-                }
-
-                // 检查内存使用
+                // 只检查内存限制，不设置超时
                 if (allSamples.size() > MAX_SAMPLES) {
-                    Log.w(TAG, "采样数过多，强制结束处理");
+                    Log.w(TAG, "采样数过多，停止处理。当前样本数:" + allSamples.size());
                     break;
                 }
+                
+                // 每10秒输出一次进度
+                long currentTime = System.currentTimeMillis();
+                long elapsed = currentTime - processStartTime;
+                if (elapsed > 0 && elapsed % 10000 < 100 && elapsed > 10000) {
+                    Log.d(TAG, "处理进度 - 已收集样本数:" + allSamples.size() + 
+                          ", 耗时:" + elapsed + "ms");
+                }
 
-                // 处理输入缓冲区
                 int inputIndex = codec.dequeueInputBuffer(10000);
                 if (inputIndex >= 0) {
-                    try {
-                        ByteBuffer inputBuffer = codec.getInputBuffer(inputIndex);
-                        if (inputBuffer != null) {
-                            int sampleSize = extractor.readSampleData(inputBuffer, 0);
-                            if (sampleSize < 0) {
-                                Log.d(TAG, "输入缓冲区结束，标记 EOS");
-                                codec.queueInputBuffer(inputIndex, 0, 0, 0, 
+                    ByteBuffer inputBuffer = codec.getInputBuffer(inputIndex);
+                    if (inputBuffer != null) {
+                        int sampleSize = extractor.readSampleData(inputBuffer, 0);
+                        if (sampleSize < 0) {
+                            codec.queueInputBuffer(inputIndex, 0, 0, 0,
                                     MediaCodec.BUFFER_FLAG_END_OF_STREAM);
-                                isEOS = true;
-                            } else {
-                                long presentationTimeUs = extractor.getSampleTime();
-                                codec.queueInputBuffer(inputIndex, 0, sampleSize, presentationTimeUs, 0);
-                                extractor.advance();
-                            }
+                            isEOS = true;
+                        } else {
+                            long presentationTimeUs = extractor.getSampleTime();
+                            codec.queueInputBuffer(inputIndex, 0, sampleSize, presentationTimeUs, 0);
+                            extractor.advance();
                         }
-                    } catch (Exception e) {
-                        Log.e(TAG, "输入缓冲区处理异常: " + e.getMessage());
-                        break;
                     }
                 }
 
-                // 处理输出缓冲区
                 int outputIndex = codec.dequeueOutputBuffer(bufferInfo, 10000);
                 while (outputIndex >= 0 && !isCancelled.get()) {
-                    try {
-                        ByteBuffer outputBuffer = codec.getOutputBuffer(outputIndex);
-                        if (outputBuffer != null && bufferInfo.size > 0) {
-                            // 限制缓冲区大小
-                            int bufferSize = Math.min(bufferInfo.size, MAX_BUFFER_SIZE);
-                            short[] shorts = new short[bufferSize / 2];
-                            outputBuffer.asShortBuffer().get(shorts);
+                    ByteBuffer outputBuffer = codec.getOutputBuffer(outputIndex);
+                    if (outputBuffer != null && bufferInfo.size > 0) {
+                        int bufferSize = Math.min(bufferInfo.size, MAX_BUFFER_SIZE);
+                        short[] shorts = new short[bufferSize / 2];
+                        outputBuffer.asShortBuffer().get(shorts);
 
-                            // 计算时间
-                            double startTimeSec = bufferInfo.presentationTimeUs / 1_000_000.0;
-                            double sampleInterval = 1.0 / sampleRate;
+                        double startTimeSec = bufferInfo.presentationTimeUs / 1_000_000.0;
+                        double sampleInterval = 1.0 / sampleRate;
 
-                            // 处理立体声
-                            short[] processedShorts = shorts;
-                            if (channelCount > 1) {
-                                processedShorts = new short[shorts.length / channelCount];
-                                for (int i = 0, j = 0; i < shorts.length; i += channelCount, j++) {
-                                    int sum = 0;
-                                    for (int c = 0; c < channelCount; c++) {
-                                        sum += Math.abs(shorts[i + c]);
-                                    }
-                                    processedShorts[j] = (short) (sum / channelCount);
+                        // --- 立体声转单声道 ---
+                        short[] processedShorts = shorts;
+                        if (channelCount > 1) {
+                            processedShorts = new short[shorts.length / channelCount];
+                            for (int i = 0, j = 0; i < shorts.length; i += channelCount, j++) {
+                                int sum = 0;
+                                for (int c = 0; c < channelCount; c++) {
+                                    sum += Math.abs(shorts[i + c]);
                                 }
+                                processedShorts[j] = (short) (sum / channelCount);
                             }
-
-                            // 采样数据，避免过多数据
-                            int step = Math.max(1, processedShorts.length / 100);
-                            for (int i = 0; i < processedShorts.length; i += step) {
-                                if (allSamples.size() >= MAX_SAMPLES) break;
-                                
-                                short maxVal = 0;
-                                int end = Math.min(i + step, processedShorts.length);
-                                for (int j = i; j < end; j++) {
-                                    maxVal = (short) Math.max(maxVal, processedShorts[j]);
-                                }
-                                
-                                double sampleTime = startTimeSec + i * sampleInterval;
-                                allSamples.add(new PCMSample(sampleTime, maxVal));
-                            }
-
-                            totalFrames += shorts.length;
                         }
-                    } catch (Exception e) {
-                        Log.e(TAG, "输出缓冲区处理异常: " + e.getMessage());
-                    } finally {
-                        try {
-                            codec.releaseOutputBuffer(outputIndex, false);
-                        } catch (Exception e) {
-                            Log.e(TAG, "释放输出缓冲区异常: " + e.getMessage());
+
+                        // --- 区间采样 ---
+                        int step = Math.max(1, processedShorts.length / 100);
+                        for (int i = 0; i < processedShorts.length; i += step) {
+                            if (allSamples.size() >= MAX_SAMPLES) break;
+
+                            short maxVal = 0;
+                            int end = Math.min(i + step, processedShorts.length);
+                            for (int j = i; j < end; j++) {
+                                short absVal = (short) Math.abs(processedShorts[j]);
+                                if (absVal > maxVal) {
+                                    maxVal = absVal;
+                                }
+                            }
+
+                            double sampleTime = startTimeSec + i * sampleInterval;
+                            allSamples.add(new PCMSample(sampleTime, maxVal));
                         }
                     }
-                    
+                    codec.releaseOutputBuffer(outputIndex, false);
                     outputIndex = codec.dequeueOutputBuffer(bufferInfo, 0);
                 }
 
                 if ((bufferInfo.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
-                    Log.d(TAG, "解码结束，总采样数:" + allSamples.size());
+                    Log.d(TAG, "解码结束，总收集样本数:" + allSamples.size() + 
+                          ", 总耗时:" + (System.currentTimeMillis() - processStartTime) + "ms");
                     break;
                 }
             }
 
             if (isCancelled.get()) {
-                Log.d(TAG, "任务已取消");
                 WritableMap cancelResult = Arguments.createMap();
                 cancelResult.putString("error", "任务已取消");
                 callback.invoke(cancelResult);
                 return;
             }
 
-            // 6. 检查数据有效性
             if (allSamples.isEmpty()) {
-                Log.w(TAG, "警告：未提取到任何 PCM 采样");
                 WritableMap errorResult = Arguments.createMap();
                 errorResult.putString("error", "未提取到音频数据");
                 callback.invoke(errorResult);
                 return;
             }
 
-            // 7. 生成波形点
             double actualDuration = allSamples.get(allSamples.size() - 1).time - allSamples.get(0).time;
             double timePerPoint = actualDuration / samples;
             
-            Log.d(TAG, "生成波形点 - 总点数:" + samples + ", 每个点时间间隔:" + timePerPoint + "秒");
+            // 添加关键调试信息
+            Log.d(TAG, "=== 波形生成调试信息 ===");
+            Log.d(TAG, "总样本数:" + allSamples.size());
+            Log.d(TAG, "第一个样本时间:" + String.format("%.3f", allSamples.get(0).time) + "秒");
+            Log.d(TAG, "最后一个样本时间:" + String.format("%.3f", allSamples.get(allSamples.size() - 1).time) + "秒");
+            Log.d(TAG, "实际时长:" + String.format("%.3f", actualDuration) + "秒");
+            Log.d(TAG, "每个点时间间隔:" + String.format("%.6f", timePerPoint) + "秒");
+            Log.d(TAG, "目标生成点数:" + samples);
+            
+            // 显示最后几个样本的值，确认是否真的静音
+            Log.d(TAG, "最后10个样本的值:");
+            for (int i = Math.max(0, allSamples.size() - 10); i < allSamples.size(); i++) {
+                PCMSample sample = allSamples.get(i);
+                Log.d(TAG, "样本" + i + " - 时间:" + String.format("%.3f", sample.time) + "s, 值:" + sample.value);
+            }
 
             WritableArray arr = Arguments.createArray();
             int sampleIndex = 0;
             int totalSamples = allSamples.size();
 
             for (int i = 0; i < samples; i++) {
-                try {
-                    double startTime = allSamples.get(0).time + i * timePerPoint;
-                    double endTime = startTime + timePerPoint;
+                double startTime = allSamples.get(0).time + i * timePerPoint;
+                double endTime = startTime + timePerPoint;
 
-                    // 跳过空区间
-                    if (sampleIndex >= totalSamples) {
-                        WritableMap point = createWaveformPoint(startTime + timePerPoint / 2, 0, i);
-                        arr.pushMap(point);
-                        continue;
-                    }
-
-                    // 查找区间起点
-                    while (sampleIndex < totalSamples && allSamples.get(sampleIndex).time < startTime) {
-                        sampleIndex++;
-                    }
-
-                    // 收集区间采样
-                    List<Short> intervalSamples = new ArrayList<>();
-                    int startIndex = sampleIndex;
-                    while (sampleIndex < totalSamples) {
-                        PCMSample sample = allSamples.get(sampleIndex);
-                        if (sample.time >= endTime) break;
-                        intervalSamples.add(sample.value);
-                        sampleIndex++;
-                    }
-
-                    // 计算波形值
-                    double value = calculateWaveformValue(intervalSamples, waveformType);
-
-                    WritableMap point = createWaveformPoint(startTime + timePerPoint / 2, value, i);
-                    arr.pushMap(point);
-                    
-                } catch (Exception e) {
-                    Log.e(TAG, "生成波形点" + i + "异常: " + e.getMessage());
-                    // 添加默认点，避免崩溃
-                    WritableMap point = createWaveformPoint(0, 0, i);
-                    arr.pushMap(point);
+                if (sampleIndex >= totalSamples) {
+                    Log.d(TAG, "区间" + i + " - sampleIndex超出范围(" + sampleIndex + ">=" + totalSamples + "), 返回0");
+                    arr.pushMap(createWaveformPoint(startTime + timePerPoint / 2, 0, i));
+                    continue;
                 }
+
+                // 记录区间开始前的sampleIndex
+                int startSampleIndex = sampleIndex;
+                while (sampleIndex < totalSamples && allSamples.get(sampleIndex).time < startTime) {
+                    sampleIndex++;
+                }
+
+                List<Short> intervalSamples = new ArrayList<>();
+                int collectedCount = 0;
+                while (sampleIndex < totalSamples) {
+                    PCMSample sample = allSamples.get(sampleIndex);
+                    if (sample.time >= endTime) break;
+                    intervalSamples.add(sample.value);
+                    sampleIndex++;
+                    collectedCount++;
+                }
+
+                // 添加调试日志
+                if (i % 50 == 0 || i >= samples - 10 || intervalSamples.size() == 0) {
+                    Log.d(TAG, "区间" + i + " - 时间[" + String.format("%.3f", startTime) + "," + String.format("%.3f", endTime) + 
+                          "], sampleIndex从" + startSampleIndex + "到" + sampleIndex + 
+                          ", 收集样本数:" + collectedCount + ", 区间样本数:" + intervalSamples.size());
+                }
+
+                double value = calculateWaveformValue(intervalSamples, waveformType);
+                
+                // 添加值调试
+                if (i % 50 == 0 || i >= samples - 10) {
+                    Log.d(TAG, "区间" + i + " - 计算值:" + String.format("%.6f", value));
+                }
+                
+                arr.pushMap(createWaveformPoint(startTime + timePerPoint / 2, value, i));
             }
 
-            Log.d(TAG, "波形生成完成，返回点数:" + arr.size());
-            
-            // 通过回调返回成功结果
             WritableMap result = Arguments.createMap();
             result.putArray("data", arr);
             callback.invoke(result);
 
         } catch (Exception e) {
-            Log.e(TAG, "处理失败:" + e.getMessage(), e);
             WritableMap errorResult = Arguments.createMap();
             errorResult.putString("error", "音频解析失败: " + e.getMessage());
             callback.invoke(errorResult);
         } finally {
-            // 安全释放资源
             if (extractor != null) {
-                try {
-                    extractor.release();
-                } catch (Exception ignored) {
-                    Log.w(TAG, "释放提取器异常: " + ignored.getMessage());
-                }
+                try { extractor.release(); } catch (Exception ignored) {}
             }
             if (codec != null) {
-                try {
-                    codec.stop();
-                    codec.release();
-                } catch (Exception ignored) {
-                    Log.w(TAG, "释放解码器异常: " + ignored.getMessage());
-                }
+                try { codec.stop(); codec.release(); } catch (Exception ignored) {}
             }
             isProcessing.set(false);
             isCancelled.set(false);
-            Log.d(TAG, "处理结束");
         }
     }
 
@@ -344,36 +306,45 @@ public class AudioWaveformModule extends ReactContextBaseJavaModule {
 
     private double calculateWaveformValue(List<Short> samples, String type) {
         if (samples.isEmpty()) return 0;
-        
+
         try {
             switch (type) {
                 case "peak":
                     short max = 0;
                     for (short s : samples) {
-                        if (s > max) max = s;
+                        short absVal = (short) Math.abs(s);
+                        if (absVal > max) max = absVal;
                     }
-                    return max / MAX_AMPLITUDE;
+                    double peak = max / MAX_AMPLITUDE;
+                    return (peak < SILENCE_THRESHOLD) ? 0 : peak;
+
                 case "rms":
                     long sumSquares = 0;
                     for (short s : samples) {
-                        sumSquares += (long) s * s;
+                        int absVal = Math.abs(s);
+                        sumSquares += (long) absVal * absVal;
                     }
-                    double rms = Math.sqrt(sumSquares / samples.size());
-                    return rms / MAX_AMPLITUDE;
+                    double rms = Math.sqrt(sumSquares / (double) samples.size());
+                    double rmsNorm = rms / MAX_AMPLITUDE;
+                    return (rmsNorm < SILENCE_THRESHOLD) ? 0 : rmsNorm;
+
                 case "logarithmic":
                     long sum = 0;
                     for (short s : samples) {
-                        sum += s;
+                        sum += Math.abs(s);
                     }
                     double avg = sum / (double) samples.size();
-                    return avg > 0 ? Math.log10(1 + avg) / Math.log10(1 + MAX_AMPLITUDE) : 0;
+                    double logVal = Math.log10(1 + avg) / Math.log10(1 + MAX_AMPLITUDE);
+                    return (logVal < SILENCE_THRESHOLD) ? 0 : logVal;
+
                 case "amplitude":
                 default:
                     long sumAmplitude = 0;
                     for (short s : samples) {
-                        sumAmplitude += s;
+                        sumAmplitude += Math.abs(s);
                     }
-                    return sumAmplitude / (double) samples.size() / MAX_AMPLITUDE;
+                    double avgAmp = (sumAmplitude / (double) samples.size()) / MAX_AMPLITUDE;
+                    return (avgAmp < SILENCE_THRESHOLD) ? 0 : avgAmp;
             }
         } catch (Exception e) {
             Log.e(TAG, "计算波形值异常: " + e.getMessage());
@@ -383,9 +354,7 @@ public class AudioWaveformModule extends ReactContextBaseJavaModule {
 
     @ReactMethod
     public void cancel() {
-        Log.d(TAG, "取消波形生成任务");
         isCancelled.set(true);
-        // 重置处理状态
         isProcessing.set(false);
     }
 
@@ -397,7 +366,6 @@ public class AudioWaveformModule extends ReactContextBaseJavaModule {
     private static class PCMSample {
         double time;
         short value;
-
         PCMSample(double time, short value) {
             this.time = time;
             this.value = value;
